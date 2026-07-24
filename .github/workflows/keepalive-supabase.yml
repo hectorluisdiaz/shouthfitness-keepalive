@@ -1,0 +1,41 @@
+name: Keepalive Supabase (Shouthfitness DB)
+
+# Supabase Free PAUSA el proyecto tras ~7 días sin actividad de base, y no se
+# reactiva solo. Este workflow toca la base cada 2 días vía /api/health/db del
+# backend (un SELECT 1) — así reinicia el contador de inactividad.
+#
+# Por qué por el backend y no directo a Supabase: las legacy API keys (anon)
+# están DESHABILITADAS a propósito (seguridad), así que no se puede pingear
+# PostgREST desde afuera. El backend, en cambio, conecta con rol privilegiado.
+#
+# Cron cada 2 días (no de alta frecuencia): los cron poco frecuentes de GitHub
+# Actions SÍ se disparan de forma confiable (la unreliability afecta sobre todo
+# a los */5, */10). Margen de sobra frente al umbral de 7 días.
+
+on:
+  schedule:
+    - cron: '17 6 */2 * *'   # 06:17 UTC, cada 2 días (minuto desfasado de :00)
+  workflow_dispatch:
+
+jobs:
+  ping-db:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Tocar la base vía /api/health/db
+        run: |
+          URL="https://shouthfitness-backend.onrender.com/api/health/db"
+          # Reintentos: el backend puede estar en cold start (Render free). Le
+          # damos varias chances con --max-time alto para atravesar el arranque.
+          for intento in 1 2 3 4 5; do
+            codigo=$(curl -s -o /tmp/db.txt -w '%{http_code}' --max-time 90 "$URL")
+            cuerpo=$(cat /tmp/db.txt)
+            echo "intento $intento → HTTP $codigo | $cuerpo"
+            if [ "$codigo" = "200" ]; then
+              echo "Supabase tocada OK."
+              exit 0
+            fi
+            echo "reintentando en 30s (cold start o DB despertando)..."
+            sleep 30
+          done
+          echo "::error::/api/health/db no devolvió 200 tras 5 intentos"
+          exit 1
