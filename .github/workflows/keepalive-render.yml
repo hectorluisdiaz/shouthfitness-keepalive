@@ -1,32 +1,49 @@
 name: Keepalive Render (Shouthfitness backend)
 
 # Render Free duerme el web service tras ~15 min sin tráfico, y la primera
-# visita posterior tarda ~40-50s en despertar. Este ping cada 10 min mantiene
-# el backend despierto. Un mes son ~730 h y el free tier da 750 instance-hours,
-# así que tenerlo siempre-on entra dentro del límite gratuito.
+# visita posterior tarda ~40-50s en despertar. Este workflow lo mantiene
+# despierto.
+#
+# POR QUÉ UN LOOP (y no un cron cada 10 min): los cron schedules de GitHub
+# Actions son POCO CONFIABLES — GitHub los retrasa o los DESCARTA bajo carga,
+# sobre todo los de alta frecuencia y los agendados en el minuto :00. En la
+# práctica un `*/10 * * * *` disparaba ~2 veces en 8 horas → el backend se
+# dormía igual. Solución: depender LO MENOS posible de la cadencia del cron.
+# Cada disparo hace ping en LOOP durante ~30 min (uno cada 4 min), así un solo
+# trigger cubre media hora entera. Se agenda 2 veces por hora, en minutos
+# DESFASADOS de la hora (:07 y :37) porque los jobs en :00 son los que más se
+# descartan. Con eso, aunque GitHub saltee algún disparo, el hueco máximo es
+# acotado en vez de horas.
 #
 # Repo PÚBLICO a propósito: los repos públicos tienen minutos de GitHub Actions
-# ilimitados (un repo privado con este cron gastaría los 2000 min/mes gratis).
-# El ping es a un endpoint de salud público — no lleva ningún secreto.
+# ilimitados. El ping es a un endpoint de salud público — no lleva secretos.
 
 on:
   schedule:
-    - cron: '*/10 * * * *'   # cada 10 minutos
+    - cron: '7,37 * * * *'   # a los :07 y :37 de cada hora (desfasado de :00)
   workflow_dispatch:          # permite dispararlo a mano desde Actions
+
+# Que no se encolen/cancelen entre sí: si un run sigue vivo cuando entra el
+# siguiente, dejamos correr el nuevo (mejor solaparse que dejar hueco).
+concurrency:
+  group: keepalive-render
+  cancel-in-progress: false
 
 jobs:
   ping:
     runs-on: ubuntu-latest
+    timeout-minutes: 35
     steps:
-      - name: Ping /api/health
+      - name: Ping /api/health en loop (~30 min)
         run: |
-          codigo=$(curl -s -o /tmp/r.txt -w '%{http_code}' --max-time 90 \
-            https://shouthfitness-backend.onrender.com/api/health)
-          echo "HTTP $codigo"
-          cat /tmp/r.txt; echo ""
-          # No fallamos el job si el backend está arrancando (cold start puede
-          # dar 502/503 momentáneo): con que le peguemos ya se despierta. Solo
-          # avisamos.
-          if [ "$codigo" != "200" ]; then
-            echo "::warning::health devolvió $codigo (puede ser cold start en curso)"
-          fi
+          URL="https://shouthfitness-backend.onrender.com/api/health"
+          # 8 pings, uno cada 4 min = ~28 min de cobertura por run.
+          for i in $(seq 1 8); do
+            codigo=$(curl -s -o /tmp/r.txt -w '%{http_code}' --max-time 90 "$URL")
+            echo "[$(date -u +%H:%M:%S)] ping $i/8 → HTTP $codigo"
+            if [ "$codigo" != "200" ]; then
+              echo "::warning::health devolvió $codigo (posible cold start en curso)"
+            fi
+            # No dormir después del último ping.
+            if [ "$i" -lt 8 ]; then sleep 240; fi
+          done
