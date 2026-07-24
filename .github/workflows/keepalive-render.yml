@@ -1,0 +1,32 @@
+name: Keepalive Render (Shouthfitness backend)
+
+# Render Free duerme el web service tras ~15 min sin tráfico, y la primera
+# visita posterior tarda ~40-50s en despertar. Este ping cada 10 min mantiene
+# el backend despierto. Un mes son ~730 h y el free tier da 750 instance-hours,
+# así que tenerlo siempre-on entra dentro del límite gratuito.
+#
+# Repo PÚBLICO a propósito: los repos públicos tienen minutos de GitHub Actions
+# ilimitados (un repo privado con este cron gastaría los 2000 min/mes gratis).
+# El ping es a un endpoint de salud público — no lleva ningún secreto.
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'   # cada 10 minutos
+  workflow_dispatch:          # permite dispararlo a mano desde Actions
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping /api/health
+        run: |
+          codigo=$(curl -s -o /tmp/r.txt -w '%{http_code}' --max-time 90 \
+            https://shouthfitness-backend.onrender.com/api/health)
+          echo "HTTP $codigo"
+          cat /tmp/r.txt; echo ""
+          # No fallamos el job si el backend está arrancando (cold start puede
+          # dar 502/503 momentáneo): con que le peguemos ya se despierta. Solo
+          # avisamos.
+          if [ "$codigo" != "200" ]; then
+            echo "::warning::health devolvió $codigo (puede ser cold start en curso)"
+          fi
