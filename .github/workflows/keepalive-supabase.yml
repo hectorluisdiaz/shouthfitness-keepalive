@@ -23,7 +23,7 @@ jobs:
     steps:
       - name: Tocar la base vía /api/health/db
         run: |
-          URL="https://shouthfitness-backend.onrender.com/api/health/db"
+          URL="https://shouthfitness-backend-va.onrender.com/api/health/db"
           # Reintentos: el backend puede estar en cold start (Render free). Le
           # damos varias chances con --max-time alto para atravesar el arranque.
           for intento in 1 2 3 4 5; do

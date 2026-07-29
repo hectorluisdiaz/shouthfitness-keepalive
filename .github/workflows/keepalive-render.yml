@@ -36,7 +36,7 @@ jobs:
     steps:
       - name: Ping /api/health en loop (~30 min)
         run: |
-          URL="https://shouthfitness-backend.onrender.com/api/health"
+          URL="https://shouthfitness-backend-va.onrender.com/api/health"
           # 8 pings, uno cada 4 min = ~28 min de cobertura por run.
           for i in $(seq 1 8); do
             codigo=$(curl -s -o /tmp/r.txt -w '%{http_code}' --max-time 90 "$URL")
